@@ -527,7 +527,7 @@ export default function App() {
         .jt-input {
           background: rgba(0,0,0,0.3); border: 1px solid var(--border-soft); color: var(--text);
           padding: 9px 12px; border-radius: 9px; font-size: 13.5px; outline: none; transition: border 0.2s;
-          width: 140px;
+          width: 140px; max-width: 100%;
         }
         .jt-input:focus { border-color: var(--purple-2); box-shadow: 0 0 0 3px rgba(168,85,247,0.15); }
         .jt-btn-primary {
@@ -629,6 +629,83 @@ export default function App() {
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.35); border-radius: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
+
+        /* ============================================================
+           MOBILE
+           ============================================================ */
+        @media (max-width: 900px) {
+          .jt-stat-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        @media (max-width: 640px) {
+          .jt-root { padding: 14px 10px 40px; }
+
+          /* topbar */
+          .jt-topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
+          .jt-topbar > div:last-child { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+          .jt-save-indicator { order: 3; width: 100%; }
+          .jt-icon-btn { padding: 8px 10px; font-size: 11.5px; flex: 1; justify-content: center; }
+
+          /* hero */
+          .jt-hero { padding: 22px 16px; border-radius: 18px; }
+          .jt-hero-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
+          .jt-hero-number { font-size: 64px; }
+          .jt-hero-dates { width: 100%; gap: 10px; }
+          .jt-hero-date-card { flex: 1 1 45%; min-width: 130px; padding: 10px 12px; }
+          .jt-hero-date-card .v { font-size: 14.5px; }
+
+          /* panels */
+          .jt-panel { padding: 15px; border-radius: 14px; }
+          .jt-panel-title { font-size: 14px; }
+
+          /* dashboard */
+          .jt-stat-grid { grid-template-columns: 1fr; gap: 10px; }
+          .jt-ring-card { padding: 14px; }
+
+          /* study hours form */
+          .jt-hours-form { flex-direction: column; align-items: stretch; gap: 10px; }
+          .jt-field { width: 100%; }
+          .jt-input { width: 100%; }
+          .jt-btn-primary { width: 100%; text-align: center; }
+          .jt-form-msg { margin-left: 0; }
+
+          .jt-analytics-top { flex-direction: column; }
+          .jt-analytics-stat { min-width: 0; }
+
+          .jt-chart { gap: 4px; }
+          .jt-chart-col { min-width: 22px; }
+          .jt-chart-date { font-size: 8px; }
+          .jt-chart-total { font-size: 8px; }
+
+          .jt-log-row { flex-wrap: wrap; gap: 4px 10px; }
+          .jt-log-row .d { width: auto; }
+
+          /* tabs — horizontal scroll instead of wrap, so labels stay full-size */
+          .jt-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+          .jt-tab { flex-shrink: 0; }
+
+          .jt-legend-row { flex-direction: column; gap: 8px; }
+
+          /* filters */
+          .jt-filters { flex-direction: column; align-items: stretch; }
+          .jt-search-wrap { min-width: 0; }
+          .jt-select { width: 100%; }
+          .jt-toggle { justify-content: flex-start; }
+
+          /* chapter rows */
+          .jt-chapter-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
+          .jt-chapter-left { min-width: 0; }
+          .jt-chapter-checks { justify-content: space-between; width: 100%; gap: 8px; }
+          .jt-check { flex-direction: column; gap: 4px; font-size: 10.5px; }
+
+          .jt-modal { padding: 18px; }
+        }
+
+        @media (max-width: 380px) {
+          .jt-hero-number { font-size: 52px; }
+          .jt-hero-date-card { flex: 1 1 100%; }
+          .jt-brand-title { font-size: 16.5px; }
+        }
       `}</style>
 
       <div className="jt-shell">
