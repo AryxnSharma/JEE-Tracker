@@ -180,35 +180,31 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState("");
   const fileInputRef = useRef(null);
 
-  /* ---------------- load from browser storage on mount ---------------- */
+  /* ---------------- load from localStorage on mount ---------------- */
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await window.storage.get(STORAGE_KEY, false);
-        if (res && res.value && !cancelled) {
-          const parsed = JSON.parse(res.value);
-          if (parsed.chapterState) setChapterState(parsed.chapterState);
-          if (parsed.hoursLog) setHoursLog(parsed.hoursLog);
-        }
-      } catch (e) {
-        // no saved data yet — that's fine, start fresh
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.chapterState) setChapterState(parsed.chapterState);
+        if (parsed.hoursLog) setHoursLog(parsed.hoursLog);
       }
-      if (!cancelled) setLoaded(true);
-    })();
-    return () => { cancelled = true; };
+    } catch (e) {
+      // no saved data yet, or storage unavailable — start fresh
+    }
+    setLoaded(true);
   }, []);
 
   /* ---------------- debounced auto-save ---------------- */
   useEffect(() => {
     if (!loaded) return;
-    const t = setTimeout(async () => {
+    const t = setTimeout(() => {
       try {
-        await window.storage.set(STORAGE_KEY, JSON.stringify({ chapterState, hoursLog }));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ chapterState, hoursLog }));
         setSavedPulse(true);
         setTimeout(() => setSavedPulse(false), 1200);
       } catch (e) {
-        // ignore transient save errors
+        // storage full or unavailable — ignore, next successful save will catch up
       }
     }, 450);
     return () => clearTimeout(t);
@@ -1003,7 +999,7 @@ export default function App() {
           <button className="jt-icon-btn" onClick={() => setShowResetConfirm(true)}><RotateCcw size={13} /> Reset chapter progress</button>
         </div>
 
-        <div className="jt-footer">Data is saved automatically in this browser session — use Backup to keep a copy, Restore to bring it back.</div>
+        <div className="jt-footer">Data is saved automatically to this browser's local storage — it stays even after a refresh, but is tied to this browser/device. Use Backup to keep a portable copy, Restore to bring it back or move it to another device.</div>
       </div>
 
       {showResetConfirm && (
