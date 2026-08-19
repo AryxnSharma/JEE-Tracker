@@ -848,7 +848,7 @@ export default function App() {
         /* ---------- scroll-triggered reveal (late, smooth, one-time) ---------- */
         .jt-reveal {
           will-change: opacity, transform;
-          transition: opacity 0.12s linear, transform 0.12s linear;
+          transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .jt-reveal-child { transform: translateY(22px); transition: transform 0.7s cubic-bezier(0.16,1,0.3,1); }
         .jt-reveal-child.revealed { transform: translateY(0); }
@@ -941,7 +941,7 @@ export default function App() {
           position: absolute; top: -20%; left: -70%; width: 40%; height: 140%;
           background: linear-gradient(100deg, transparent, rgba(255,255,255,0.14), transparent);
           transform: skewX(-16deg);
-          animation: glassSheen 12s ease-in-out infinite 1.5s;
+          animation: glassSheen 1.2s ease-in-out 0.6s 1 forwards;
           pointer-events: none;
         }
         .jt-hero-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; position: relative; z-index: 1; }
@@ -986,7 +986,7 @@ export default function App() {
           position: absolute; top: -20%; left: -70%; width: 45%; height: 140%;
           background: linear-gradient(100deg, transparent, rgba(255,255,255,0.10), transparent);
           transform: skewX(-16deg);
-          animation: glassSheen 10s ease-in-out infinite;
+          animation: glassSheen 1.2s ease-in-out 0.3s 1 forwards;
           pointer-events: none;
         }
         .jt-panel:hover {
