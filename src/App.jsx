@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   Clock, BookOpen, CheckCircle2, Circle, Flame, TrendingUp, Calendar,
   Download, Upload, Search, X, Target, Zap, Award, ChevronDown, RotateCcw,
+  Sparkles, Trophy, Repeat, PenLine, Share2, Grid3x3, BarChart3, Rocket,
+  ChevronRight, Plus, Trash2, Star, Compass, Medal,
 } from "lucide-react";
 
 /* ============================================================
@@ -137,12 +139,35 @@ const D_COLORS = {
   Hard: { bg: "rgba(244,63,94,0.14)", text: "#fb7185", border: "rgba(244,63,94,0.4)" },
 };
 
+// IMPORTANT: same key as before — this is what keeps every existing user's
+// progress intact across this upgrade. Never change this string.
 const STORAGE_KEY = "jee-tracker-data-v1";
-const MOCK_CUTOFF_STR = "2027-01-10"; // 10-day buffer before actual exam, for mock-test practice
-const EXAM_STR = "2027-01-20"; // approx JEE Main Jan 2027 window start
+const MOCK_CUTOFF_STR = "2027-01-10";
+const EXAM_STR = "2027-01-20";
+
+const BADGES = [
+  { id: "first_step", label: "1 Chapter", icon: "🌱", desc: "Complete your first chapter", check: (d) => d.done >= 1 },
+  { id: "ten_down", label: "10 Chapters", icon: "⚡", desc: "Finish 10 chapters", check: (d) => d.done >= 10 },
+  { id: "quarter", label: "25% Done", icon: "🎯", desc: "25% of the syllabus done", check: (d) => d.pct >= 25 },
+  { id: "half", label: "50% Done", icon: "🚀", desc: "50% of the syllabus done", check: (d) => d.pct >= 50 },
+  { id: "three_q", label: "75% Done", icon: "🔥", desc: "75% of the syllabus done", check: (d) => d.pct >= 75 },
+  { id: "full", label: "100% Done", icon: "🏆", desc: "All chapters completed", check: (d) => d.pct >= 100 },
+  { id: "dpp_50", label: "50 DPPs", icon: "✍️", desc: "Clear 50 DPP sets", check: (d) => d.dppDone >= 50 },
+  { id: "pyq_50", label: "50 PYQ Sets", icon: "📚", desc: "Clear 50 PYQ sets", check: (d) => d.pyqDone >= 50 },
+  { id: "revise_25", label: "25 Revised", icon: "🔁", desc: "Revise 25 chapters", check: (d) => d.revisedDone >= 25 },
+  { id: "streak_7", label: "7 Day Streak", icon: "🗓️", desc: "Study 7 days in a row", check: (d) => d.streak >= 7 },
+  { id: "streak_30", label: "30 Day Streak", icon: "🌟", desc: "Study 30 days in a row", check: (d) => d.streak >= 30 },
+  { id: "hours_100", label: "100 Hours", icon: "⏳", desc: "Log 100 total study hours", check: (d) => d.totalHours >= 100 },
+  { id: "physics_done", label: "Physics Done", icon: "🧲", desc: "Complete all of Physics", check: (d) => d.subjectDone.physics },
+  { id: "chem_done", label: "Chemistry Done", icon: "⚗️", desc: "Complete all of Chemistry", check: (d) => d.subjectDone.chem },
+  { id: "maths_done", label: "Maths Done", icon: "📐", desc: "Complete all of Maths", check: (d) => d.subjectDone.maths },
+];
 
 function todayStr() {
   const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function dateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function daysUntil(dateStr) {
@@ -159,10 +184,122 @@ function formatShortDate(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
+function levelForXp(xp) {
+  // gently increasing thresholds
+  let level = 1, need = 100, total = 0;
+  while (xp >= total + need) {
+    total += need;
+    level += 1;
+    need = Math.round(need * 1.18);
+  }
+  return { level, into: xp - total, span: need, next: total + need };
+}
+
+/* ---------------- scroll-linked reveal hook ----------------
+   Instead of firing a fixed-duration transition once a threshold is
+   crossed (which feels like a "pop" mid-scroll), this ties opacity/
+   transform directly to how far the element has travelled through a
+   reveal band in the viewport — so it moves in lockstep with the
+   scroll itself, frame by frame. Progress is monotonic (never reverses
+   once revealed) so scrolling back up doesn't cause flicker. */
+function useScrollProgress() {
+  const ref = useRef(null);
+  const [progress, setProgress] = useState(0);
+  const maxProgress = useRef(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof window === "undefined") return;
+    let ticking = false;
+    const compute = () => {
+      ticking = false;
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+      const bandStart = vh * 0.94;
+      const bandEnd = vh * 0.6;
+      const raw = (bandStart - rect.top) / (bandStart - bandEnd);
+      const clamped = Math.max(0, Math.min(1, raw));
+      if (clamped > maxProgress.current) {
+        maxProgress.current = clamped;
+        setProgress(clamped);
+      }
+    };
+    const onScroll = () => {
+      if (!ticking) { ticking = true; requestAnimationFrame(compute); }
+    };
+    compute();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+  return [ref, progress];
+}
+
+/* ---------------- lightweight confetti burst (canvas, no deps) ---------------- */
+function fireConfetti(originEl) {
+  try {
+    const rect = originEl?.getBoundingClientRect?.();
+    const canvas = document.createElement("canvas");
+    canvas.style.position = "fixed";
+    canvas.style.inset = "0";
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "999";
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+    const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 3;
+    const colors = ["#a855f7", "#ec4899", "#fbbf24", "#34d399", "#60a5fa"];
+    const particles = Array.from({ length: 46 }, () => ({
+      x: cx, y: cy,
+      vx: (Math.random() - 0.5) * 9,
+      vy: -Math.random() * 8 - 3,
+      g: 0.28 + Math.random() * 0.12,
+      size: 4 + Math.random() * 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.3,
+      life: 0,
+    }));
+    let frame = 0;
+    function tick() {
+      frame++;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+      for (const p of particles) {
+        p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life++;
+        const opacity = Math.max(0, 1 - p.life / 70);
+        if (opacity > 0 && p.y < canvas.height + 20) {
+          alive = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+          ctx.globalAlpha = opacity;
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+          ctx.restore();
+        }
+      }
+      if (alive && frame < 90) requestAnimationFrame(tick);
+      else document.body.removeChild(canvas);
+    }
+    requestAnimationFrame(tick);
+  } catch (e) {
+    // canvas unsupported — silently skip, never block the UI for this
+  }
+}
 
 export default function App() {
   const [chapterState, setChapterState] = useState({});
   const [hoursLog, setHoursLog] = useState({});
+  const [mockTests, setMockTests] = useState([]);
+  const [focusList, setFocusList] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [savedPulse, setSavedPulse] = useState(false);
 
@@ -171,22 +308,49 @@ export default function App() {
   const [wFilter, setWFilter] = useState("All");
   const [dFilter, setDFilter] = useState("All");
   const [pendingOnly, setPendingOnly] = useState(false);
+  const [openNotesId, setOpenNotesId] = useState(null);
+  const [chartView, setChartView] = useState("bars"); // 'bars' | 'heatmap'
 
   const [logDate, setLogDate] = useState(todayStr());
   const [lectureH, setLectureH] = useState("");
   const [selfH, setSelfH] = useState("");
   const [formMsg, setFormMsg] = useState("");
 
+  const [addingFocus, setAddingFocus] = useState(false);
+  const [focusSearch, setFocusSearch] = useState("");
+
+  const [mtName, setMtName] = useState("");
+  const [mtDate, setMtDate] = useState(todayStr());
+  const [mtScore, setMtScore] = useState("");
+  const [mtMax, setMtMax] = useState("300");
+  const [mtMsg, setMtMsg] = useState("");
+
   const [errorMsg, setErrorMsg] = useState("");
+  const [toast, setToast] = useState(null); // { icon, title, sub }
   const fileInputRef = useRef(null);
   const checklistRef = useRef(null);
   const tabsWrapRef = useRef(null);
   const tabRefs = useRef({});
   const [tabIndicator, setTabIndicator] = useState({ left: 0, width: 0, ready: false });
+  const seenBadgesRef = useRef(null); // null until first computed, so first load never toasts
+  const xpBarRef = useRef(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [ringAnimated, setRingAnimated] = useState(false);
+
+  const [dashRef, dashProgress] = useScrollProgress();
+  const [focusRef, focusProgress] = useScrollProgress();
+  const [hoursRef, hoursProgress] = useScrollProgress();
+  const [mockRef, mockProgress] = useScrollProgress();
+  const [checklistRevealRef, checklistProgress] = useScrollProgress();
 
   const goToSubject = useCallback((key) => {
     setActiveSubject(key);
     checklistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const showToast = useCallback((t) => {
+    setToast(t);
+    setTimeout(() => setToast(null), 3600);
   }, []);
 
   /* ---------------- sliding tab indicator ---------------- */
@@ -200,7 +364,9 @@ export default function App() {
     return () => window.removeEventListener("resize", measure);
   }, [activeSubject]);
 
-  /* ---------------- load from localStorage on mount ---------------- */
+  /* ---------------- load from localStorage on mount ----------------
+     Backward-compatible: every new field defaults safely if missing,
+     so upgrading the app NEVER erases anyone's existing progress. */
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -208,11 +374,14 @@ export default function App() {
         const parsed = JSON.parse(raw);
         if (parsed.chapterState) setChapterState(parsed.chapterState);
         if (parsed.hoursLog) setHoursLog(parsed.hoursLog);
+        if (Array.isArray(parsed.mockTests)) setMockTests(parsed.mockTests);
+        if (Array.isArray(parsed.focusList)) setFocusList(parsed.focusList);
       }
     } catch (e) {
-      // no saved data yet, or storage unavailable — start fresh
+      // no saved data yet, or storage unavailable — start fresh, never throw
     }
     setLoaded(true);
+    requestAnimationFrame(() => setTimeout(() => setRingAnimated(true), 120));
   }, []);
 
   /* ---------------- debounced auto-save ---------------- */
@@ -220,7 +389,7 @@ export default function App() {
     if (!loaded) return;
     const t = setTimeout(() => {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ chapterState, hoursLog }));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ chapterState, hoursLog, mockTests, focusList }));
         setSavedPulse(true);
         setTimeout(() => setSavedPulse(false), 1200);
       } catch (e) {
@@ -228,13 +397,20 @@ export default function App() {
       }
     }, 450);
     return () => clearTimeout(t);
-  }, [chapterState, hoursLog, loaded]);
+  }, [chapterState, hoursLog, mockTests, focusList, loaded]);
 
-  const toggleField = useCallback((chapterId, field) => {
-    setChapterState((prev) => ({
-      ...prev,
-      [chapterId]: { ...prev[chapterId], [field]: !prev[chapterId]?.[field] },
-    }));
+  const toggleField = useCallback((chapterId, field, evt) => {
+    setChapterState((prev) => {
+      const wasOn = !!prev[chapterId]?.[field];
+      if (field === "completed" && !wasOn && evt?.currentTarget) {
+        fireConfetti(evt.currentTarget);
+      }
+      return { ...prev, [chapterId]: { ...prev[chapterId], [field]: !wasOn } };
+    });
+  }, []);
+
+  const setNotes = useCallback((chapterId, text) => {
+    setChapterState((prev) => ({ ...prev, [chapterId]: { ...prev[chapterId], notes: text } }));
   }, []);
 
   /* ---------------- derived stats ---------------- */
@@ -258,7 +434,8 @@ export default function App() {
     const done = allFlat.filter((c) => chapterState[c.id]?.completed).length;
     const dppDone = allFlat.filter((c) => chapterState[c.id]?.dpp).length;
     const pyqDone = allFlat.filter((c) => chapterState[c.id]?.pyq).length;
-    return { total, done, dppDone, pyqDone };
+    const revisedDone = allFlat.filter((c) => chapterState[c.id]?.revised).length;
+    return { total, done, dppDone, pyqDone, revisedDone };
   }, [allFlat, chapterState]);
 
   const chemistryStats = useMemo(() => {
@@ -290,39 +467,52 @@ export default function App() {
     for (let i = 13; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const key = dateKey(d);
       const v = hoursLog[key];
       days.push({ date: key, lecture: v ? Number(v.lecture) || 0 : 0, self: v ? Number(v.self) || 0 : 0 });
     }
     return days;
   }, [hoursLog]);
 
+  const heatmapWeeks = useMemo(() => {
+    // 18 weeks (~126 days) ending today, Sun-start columns, GitHub-style
+    const totalDays = 126;
+    const end = new Date();
+    const endDow = end.getDay();
+    end.setDate(end.getDate() + (6 - endDow)); // extend to end of this week (Sat)
+    const cells = [];
+    for (let i = totalDays - 1; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(d.getDate() - i);
+      const key = dateKey(d);
+      const v = hoursLog[key];
+      const total = v ? (Number(v.lecture) || 0) + (Number(v.self) || 0) : 0;
+      cells.push({ date: key, total, future: d > new Date() });
+    }
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
+  }, [hoursLog]);
+
   const totalHoursAllTime = useMemo(
     () => sortedHoursEntries.reduce((s, e) => s + e.lecture + e.self, 0),
     [sortedHoursEntries]
   );
-  const last7Total = useMemo(
-    () => last14.slice(7).reduce((s, e) => s + e.lecture + e.self, 0),
-    [last14]
-  );
-  const maxDayTotal = useMemo(
-    () => Math.max(1, ...last14.map((e) => e.lecture + e.self)),
-    [last14]
-  );
+  const last7Total = useMemo(() => last14.slice(7).reduce((s, e) => s + e.lecture + e.self, 0), [last14]);
+  const maxDayTotal = useMemo(() => Math.max(1, ...last14.map((e) => e.lecture + e.self)), [last14]);
 
   const streak = useMemo(() => {
     let count = 0;
     let d = new Date();
-    // if today has no entry yet, streak still counts from yesterday backward
     let key = todayStr();
     if (!hoursLog[key]) {
       d.setDate(d.getDate() - 1);
-      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      key = dateKey(d);
     }
     while (hoursLog[key] && (Number(hoursLog[key].lecture) || 0) + (Number(hoursLog[key].self) || 0) > 0) {
       count++;
       d.setDate(d.getDate() - 1);
-      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      key = dateKey(d);
     }
     return count;
   }, [hoursLog]);
@@ -348,13 +538,105 @@ export default function App() {
     });
   };
 
+  /* ---------------- mock tests ---------------- */
+  const sortedMocks = useMemo(
+    () => [...mockTests].sort((a, b) => (a.date < b.date ? -1 : 1)),
+    [mockTests]
+  );
+  const mockMaxObserved = useMemo(
+    () => Math.max(300, ...mockTests.map((m) => Number(m.maxScore) || 0)),
+    [mockTests]
+  );
+  const bestMock = useMemo(
+    () => mockTests.reduce((best, m) => {
+      const pct = (Number(m.score) / Math.max(1, Number(m.maxScore))) * 100;
+      return !best || pct > best.pct ? { ...m, pct } : best;
+    }, null),
+    [mockTests]
+  );
+  const avgMockPct = useMemo(() => {
+    if (!mockTests.length) return 0;
+    const total = mockTests.reduce((s, m) => s + (Number(m.score) / Math.max(1, Number(m.maxScore))) * 100, 0);
+    return Math.round(total / mockTests.length);
+  }, [mockTests]);
+
+  const handleAddMock = () => {
+    const score = parseFloat(mtScore);
+    const max = parseFloat(mtMax);
+    if (!mtName.trim()) { setMtMsg("Give the test a name."); return; }
+    if (isNaN(score) || isNaN(max) || max <= 0) { setMtMsg("Enter a valid score and max marks."); return; }
+    if (score < 0 || score > max) { setMtMsg("Score can't exceed max marks."); return; }
+    setMockTests((prev) => [...prev, { id: `mt_${Date.now()}`, name: mtName.trim(), date: mtDate, score, maxScore: max }]);
+    setMtMsg(`Logged "${mtName.trim()}".`);
+    setMtName(""); setMtScore("");
+    setTimeout(() => setMtMsg(""), 2500);
+  };
+  const handleDeleteMock = (id) => setMockTests((prev) => prev.filter((m) => m.id !== id));
+
+  /* ---------------- XP / level / achievements (derived only — nothing new to store) ---------------- */
+  const xp = useMemo(() => {
+    return overall.done * 12 + overall.dppDone * 4 + overall.pyqDone * 4 + overall.revisedDone * 3 + Math.round(totalHoursAllTime * 1.5);
+  }, [overall, totalHoursAllTime]);
+  const levelInfo = useMemo(() => levelForXp(xp), [xp]);
+
+  const badgeData = useMemo(() => {
+    const pct = overall.total ? (overall.done / overall.total) * 100 : 0;
+    return {
+      done: overall.done, pct, dppDone: overall.dppDone, pyqDone: overall.pyqDone,
+      revisedDone: overall.revisedDone, streak, totalHours: totalHoursAllTime,
+      subjectDone: {
+        physics: subjectStats.physics.done === subjectStats.physics.total,
+        chem: chemistryStats.done === chemistryStats.total,
+        maths: subjectStats.maths.done === subjectStats.maths.total,
+      },
+    };
+  }, [overall, streak, totalHoursAllTime, subjectStats, chemistryStats]);
+
+  const unlockedBadges = useMemo(() => BADGES.filter((b) => b.check(badgeData)), [badgeData]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (seenBadgesRef.current === null) {
+      // first computation after load — just record, no toast (avoids
+      // spamming toasts for badges the user already earned before)
+      seenBadgesRef.current = new Set(unlockedBadges.map((b) => b.id));
+      return;
+    }
+    const newly = unlockedBadges.filter((b) => !seenBadgesRef.current.has(b.id));
+    if (newly.length) {
+      unlockedBadges.forEach((b) => seenBadgesRef.current.add(b.id));
+      const b = newly[0];
+      showToast({ icon: b.icon, title: `Badge unlocked: ${b.label}`, sub: b.desc });
+      if (xpBarRef.current) fireConfetti(xpBarRef.current);
+    }
+  }, [unlockedBadges, loaded, showToast]);
+
+  /* ---------------- focus mode: user picks chapters manually ---------------- */
+  const focusChapters = useMemo(
+    () => focusList.map((id) => allFlat.find((c) => c.id === id)).filter(Boolean),
+    [focusList, allFlat]
+  );
+  const focusPickerResults = useMemo(() => {
+    const q = focusSearch.trim().toLowerCase();
+    return allFlat
+      .filter((c) => !focusList.includes(c.id))
+      .filter((c) => !q || c.name.toLowerCase().includes(q))
+      .slice(0, 40);
+  }, [allFlat, focusList, focusSearch]);
+  const addToFocus = useCallback((id) => {
+    setFocusList((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  }, []);
+  const removeFromFocus = useCallback((id) => {
+    setFocusList((prev) => prev.filter((x) => x !== id));
+  }, []);
+
   /* ---------------- countdown ---------------- */
   const daysToMock = Math.max(0, daysUntil(MOCK_CUTOFF_STR));
   const daysToExam = Math.max(0, daysUntil(EXAM_STR));
 
   /* ---------------- export / import ---------------- */
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ chapterState, hoursLog }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ chapterState, hoursLog, mockTests, focusList }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -371,6 +653,8 @@ export default function App() {
         const parsed = JSON.parse(reader.result);
         if (parsed.chapterState) setChapterState(parsed.chapterState);
         if (parsed.hoursLog) setHoursLog(parsed.hoursLog);
+        if (Array.isArray(parsed.mockTests)) setMockTests(parsed.mockTests);
+        if (Array.isArray(parsed.focusList)) setFocusList(parsed.focusList);
         setErrorMsg("");
       } catch (err) {
         setErrorMsg("Couldn't read that file — make sure it's a valid backup JSON.");
@@ -384,9 +668,89 @@ export default function App() {
     setChapterState({});
     setShowResetConfirm(false);
   };
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  /* ---------------- shareable progress card ---------------- */
+  const shareProgressCard = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1080; canvas.height = 1350;
+    const ctx = canvas.getContext("2d");
+    const grad = ctx.createLinearGradient(0, 0, 1080, 1350);
+    grad.addColorStop(0, "#0a0510");
+    grad.addColorStop(0.5, "#1b0f2e");
+    grad.addColorStop(1, "#0a0510");
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, 1080, 1350);
+
+    ctx.fillStyle = "rgba(168,85,247,0.18)";
+    ctx.beginPath(); ctx.arc(900, 180, 260, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(236,72,153,0.13)";
+    ctx.beginPath(); ctx.arc(120, 1200, 260, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "700 30px Segoe UI, sans-serif";
+    ctx.fillText("JEE PREP TRACKER", 70, 120);
+
+    ctx.fillStyle = "#f3ecff";
+    ctx.font = "900 150px Segoe UI, sans-serif";
+    const pct = overall.total ? Math.round((overall.done / overall.total) * 100) : 0;
+    ctx.fillText(`${pct}%`, 70, 320);
+
+    ctx.fillStyle = "#b8a6d9";
+    ctx.font = "600 32px Segoe UI, sans-serif";
+    ctx.fillText(`${overall.done} / ${overall.total} chapters complete`, 70, 380);
+
+    const rows = [
+      ["Level", `${levelInfo.level}  (${xp} XP)`],
+      ["Streak", `${streak} days`],
+      ["DPPs cleared", `${overall.dppDone}`],
+      ["PYQ sets cleared", `${overall.pyqDone}`],
+      ["Total hours logged", `${totalHoursAllTime.toFixed(0)}h`],
+      ["Badges earned", `${unlockedBadges.length} / ${BADGES.length}`],
+      ["Days to JEE Mains", `${daysToExam}`],
+    ];
+    let y = 470;
+    rows.forEach(([k, v]) => {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(70, y - 40, 940, 66);
+      ctx.fillStyle = "#b8a6d9"; ctx.font = "600 26px Segoe UI, sans-serif";
+      ctx.fillText(k, 100, y);
+      ctx.fillStyle = "#f3ecff"; ctx.font = "800 28px Segoe UI, sans-serif";
+      ctx.fillText(v, 700, y);
+      y += 92;
+    });
+
+    SUBJECT_KEYS.forEach((k, i) => {
+      const s = subjectStats[k];
+      const p = s.total ? s.done / s.total : 0;
+      const barY = y + i * 60;
+      ctx.fillStyle = "rgba(255,255,255,0.08)";
+      ctx.fillRect(70, barY, 940, 34);
+      ctx.fillStyle = SUBJECT_META[k].color;
+      ctx.fillRect(70, barY, 940 * p, 34);
+      ctx.fillStyle = "#fff"; ctx.font = "700 20px Segoe UI, sans-serif";
+      ctx.fillText(`${SUBJECT_META[k].short}  ${s.done}/${s.total}`, 84, barY + 24);
+    });
+
+    ctx.fillStyle = "#7a6a97"; ctx.font = "600 22px Segoe UI, sans-serif";
+    ctx.fillText(`Generated ${formatNiceDate(todayStr())} · Target 240–250/300 · OBC-NCL`, 70, 1300);
+
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `jee-progress-${todayStr()}.png`; a.click();
+      URL.revokeObjectURL(url);
+    });
+  };
 
   const overallPct = overall.total ? Math.round((overall.done / overall.total) * 100) : 0;
+  const maxHeatVal = useMemo(() => Math.max(1, ...heatmapWeeks.flat().map((c) => c.total)), [heatmapWeeks]);
+  const heatColor = (v) => {
+    if (v <= 0) return "rgba(255,255,255,0.05)";
+    const t = Math.min(1, v / maxHeatVal);
+    if (t < 0.25) return "rgba(168,85,247,0.25)";
+    if (t < 0.5) return "rgba(168,85,247,0.45)";
+    if (t < 0.75) return "rgba(168,85,247,0.7)";
+    return "#a855f7";
+  };
 
   return (
     <div className="jt-root">
@@ -441,14 +805,45 @@ export default function App() {
         @keyframes slideInRight { from { opacity: 0; transform: translateX(48px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes slideInUpFade { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes barShimmer { 0% { transform: translateX(-120%); } 100% { transform: translateX(260%); } }
+        @keyframes badgePop { 0% { opacity: 0; transform: scale(0.5) rotate(-8deg);} 60% { opacity: 1; transform: scale(1.08) rotate(3deg);} 100% { transform: scale(1) rotate(0);} }
+        @keyframes toastIn { from { opacity: 0; transform: translate(-50%, -18px) scale(0.92); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+        @keyframes glowPulse { 0%,100% { box-shadow: 0 0 18px var(--card-glow, rgba(168,85,247,0.35)); } 50% { box-shadow: 0 0 32px var(--card-glow, rgba(168,85,247,0.55)); } }
+        @keyframes xpFill { from { width: 0%; } }
+        @keyframes ringSpin { from { stroke-dashoffset: 226; } }
+        @keyframes float3 { 0%,100% { transform: translateY(0) rotate(0deg);} 50% { transform: translateY(-4px) rotate(1deg);} }
 
         .fade-in { animation: fadeInUp 0.5s ease both; }
         .slide-down { animation: slideInDown 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
         .slide-left { animation: slideInLeft 0.65s cubic-bezier(0.22, 1, 0.36, 1) both; }
         .slide-up-1 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.05s; }
-        .slide-up-2 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.15s; }
-        .slide-up-3 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.25s; }
+        .slide-up-2 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.12s; }
+        .slide-up-3 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.19s; }
+        .slide-up-4 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.26s; }
+        .slide-up-5 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.33s; }
         .slide-right-stagger { animation: slideInRight 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+        /* ---------- scroll-triggered reveal (late, smooth, one-time) ---------- */
+        .jt-reveal {
+          will-change: opacity, transform;
+          transition: opacity 0.12s linear, transform 0.12s linear;
+        }
+        .jt-reveal-child { transform: translateY(22px); transition: transform 0.7s cubic-bezier(0.16,1,0.3,1); }
+        .jt-reveal-child.revealed { transform: translateY(0); }
+
+        /* ---------- toast ---------- */
+        .jt-toast {
+          position: fixed; top: 18px; left: 50%; z-index: 200;
+          display: flex; align-items: center; gap: 12px;
+          background: linear-gradient(120deg, rgba(124,58,237,0.94), rgba(236,72,153,0.9));
+          border: 1px solid rgba(255,255,255,0.25);
+          border-radius: 16px; padding: 12px 18px;
+          box-shadow: 0 12px 40px rgba(124,58,237,0.5);
+          animation: toastIn 0.4s cubic-bezier(0.22,1,0.36,1) both;
+          max-width: 92vw;
+        }
+        .jt-toast .icon { font-size: 26px; animation: float3 1.6s ease-in-out infinite; }
+        .jt-toast .title { font-size: 13.5px; font-weight: 800; color: #fff; }
+        .jt-toast .sub { font-size: 11.5px; color: rgba(255,255,255,0.85); }
 
         /* ---------- top bar ---------- */
         .jt-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
@@ -471,7 +866,14 @@ export default function App() {
           color: var(--text-dim); padding: 7px 12px; border-radius: 9px;
           font-size: 12.5px; cursor: pointer; transition: all 0.2s;
         }
-        .jt-icon-btn:hover { background: var(--bg-panel-hover); color: var(--text); border-color: rgba(168,85,247,0.4); }
+        .jt-icon-btn:hover { background: var(--bg-panel-hover); color: var(--text); border-color: rgba(168,85,247,0.4); transform: translateY(-1px); }
+
+        /* ---------- XP bar ---------- */
+        .jt-xp-wrap { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.28); border: 1px solid var(--border-soft); border-radius: 999px; padding: 6px 14px 6px 8px; }
+        .jt-xp-badge { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), #f59e0b); display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 900; color: #3a2400; flex-shrink: 0; }
+        .jt-xp-track { width: 120px; height: 7px; border-radius: 6px; background: rgba(255,255,255,0.1); overflow: hidden; }
+        .jt-xp-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--gold), var(--pink)); animation: xpFill 1s cubic-bezier(0.22,1,0.36,1) both; }
+        .jt-xp-text { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
 
         /* ---------- countdown hero ---------- */
         .jt-hero {
@@ -504,7 +906,9 @@ export default function App() {
         .jt-hero-date-card {
           background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.1);
           border-radius: 14px; padding: 12px 18px; min-width: 150px;
+          transition: transform 0.25s ease, border-color 0.25s ease;
         }
+        .jt-hero-date-card:hover { transform: translateY(-3px); border-color: rgba(168,85,247,0.5); }
         .jt-hero-date-card .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); margin-bottom: 4px; }
         .jt-hero-date-card .v { font-size: 16.5px; font-weight: 700; }
         .jt-hero-date-card .v2 { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
@@ -517,9 +921,11 @@ export default function App() {
           padding: 20px;
           backdrop-filter: blur(14px);
           margin-bottom: 20px;
+          transition: border-color 0.3s ease;
         }
         .jt-panel-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
         .jt-panel-sub { font-size: 12px; color: var(--text-faint); margin-bottom: 16px; }
+        .jt-panel-head-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 
         /* ---------- dashboard cards ---------- */
         .jt-stat-grid { display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
@@ -538,10 +944,10 @@ export default function App() {
 
         .jt-mini-card {
           background: var(--bg-panel); border: 1px solid var(--border-soft); border-radius: 16px; padding: 14px 16px;
-          display: flex; flex-direction: column; gap: 8px; cursor: pointer; transition: all 0.2s;
+          display: flex; flex-direction: column; gap: 8px; cursor: pointer; transition: all 0.25s cubic-bezier(0.22,1,0.36,1);
         }
-        .jt-mini-card:hover { background: var(--bg-panel-hover); transform: translateY(-2px); }
-        .jt-mini-card.active { border-color: var(--card-color, var(--purple-2)); box-shadow: 0 0 20px var(--card-glow, rgba(168,85,247,0.35)); }
+        .jt-mini-card:hover { background: var(--bg-panel-hover); transform: translateY(-3px) scale(1.015); }
+        .jt-mini-card.active { border-color: var(--card-color, var(--purple-2)); animation: glowPulse 2.4s ease-in-out infinite; }
         .jt-mini-card .top { display: flex; align-items: center; justify-content: space-between; }
         .jt-mini-card .name { font-size: 12.5px; font-weight: 700; color: var(--text-dim); }
         .jt-mini-card .count { font-size: 11.5px; color: var(--text-faint); }
@@ -556,6 +962,37 @@ export default function App() {
         .jt-substat-row { display:flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
         .jt-pill { font-size: 11px; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,0.06); color: var(--text-dim); display:flex; gap:5px; align-items:center; }
 
+        /* ---------- badges ---------- */
+        .jt-badge-strip { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px; margin-top: 14px; }
+        .jt-badge {
+          flex-shrink: 0; width: 96px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+          padding: 12px 8px; border-radius: 14px; text-align: center;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+          opacity: 0.35; filter: grayscale(1); transition: all 0.3s ease;
+        }
+        .jt-badge.earned { opacity: 1; filter: none; background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.35); animation: badgePop 0.5s ease both; }
+        .jt-badge .emoji { font-size: 26px; }
+        .jt-badge .label { font-size: 10.5px; font-weight: 700; }
+        .jt-badge .desc { font-size: 9px; color: var(--text-faint); line-height: 1.3; }
+
+        /* ---------- focus mode ---------- */
+        .jt-focus-list { display: flex; flex-direction: column; gap: 8px; }
+        .jt-focus-row {
+          display: flex; align-items: center; justify-content: space-between; gap: 10px;
+          background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 12px; padding: 10px 14px; transition: background 0.2s;
+        }
+        .jt-focus-row:hover { background: rgba(255,255,255,0.06); }
+        .jt-focus-left { display: flex; align-items: center; gap: 10px; }
+        .jt-focus-rank { width: 24px; height: 24px; border-radius: 8px; display:flex; align-items:center; justify-content:center; font-size: 11px; font-weight: 800; background: rgba(168,85,247,0.2); color: var(--purple-2); flex-shrink: 0; }
+        .jt-focus-name { font-size: 13px; font-weight: 600; }
+        .jt-focus-sub { font-size: 10.5px; color: var(--text-faint); }
+        .jt-focus-btn { display: flex; align-items: center; gap: 5px; background: rgba(52,211,153,0.14); border: 1px solid rgba(52,211,153,0.4); color: #34d399; padding: 6px 11px; border-radius: 8px; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .jt-focus-btn:hover { background: rgba(52,211,153,0.25); transform: translateY(-1px); }
+        .jt-focus-picker-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+        .jt-focus-pick-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
+        .jt-focus-pick-row:hover { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.3); }
+
         /* ---------- study hours ---------- */
         .jt-hours-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
         .jt-field { display: flex; flex-direction: column; gap: 5px; }
@@ -566,6 +1003,7 @@ export default function App() {
           width: 140px; max-width: 100%;
         }
         .jt-input:focus { border-color: var(--purple-2); box-shadow: 0 0 0 3px rgba(168,85,247,0.15); }
+        textarea.jt-input { width: 100%; resize: vertical; min-height: 60px; font-family: inherit; }
         .jt-btn-primary {
           background: linear-gradient(135deg, var(--purple-1), var(--pink));
           color: white; border: none; padding: 10px 18px; border-radius: 9px; font-size: 13.5px; font-weight: 700;
@@ -574,8 +1012,13 @@ export default function App() {
         .jt-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(168,85,247,0.5); }
         .jt-form-msg { font-size: 12px; color: var(--gold); margin-left: 4px; }
 
+        .jt-view-toggle { display: flex; gap: 4px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft); border-radius: 9px; padding: 3px; }
+        .jt-view-toggle button { display:flex; align-items:center; gap:5px; background: transparent; border: none; color: var(--text-faint); padding: 6px 10px; border-radius: 7px; font-size: 11.5px; cursor: pointer; transition: all 0.2s; }
+        .jt-view-toggle button.on { background: linear-gradient(135deg, var(--purple-1), var(--pink)); color: #fff; }
+
         .jt-analytics-top { display: flex; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
-        .jt-analytics-stat { background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 16px; flex: 1; min-width: 130px; }
+        .jt-analytics-stat { background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 16px; flex: 1; min-width: 130px; transition: transform 0.2s; }
+        .jt-analytics-stat:hover { transform: translateY(-2px); }
         .jt-analytics-stat .n { font-size: 21px; font-weight: 800; }
         .jt-analytics-stat .l { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 
@@ -587,7 +1030,12 @@ export default function App() {
         .jt-chart-date { font-size: 9.5px; color: var(--text-faint); }
         .jt-chart-total { font-size: 9.5px; color: var(--text-dim); font-weight: 700; }
 
-        .jt-legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--text-dim); margin-top: 10px; }
+        .jt-heatmap { display: flex; gap: 3px; overflow-x: auto; padding: 8px 2px; }
+        .jt-heat-col { display: flex; flex-direction: column; gap: 3px; }
+        .jt-heat-cell { width: 12px; height: 12px; border-radius: 3px; transition: transform 0.15s; }
+        .jt-heat-cell:hover { transform: scale(1.4); }
+
+        .jt-legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--text-dim); margin-top: 10px; flex-wrap: wrap; }
         .jt-legend span { display: flex; align-items: center; gap: 6px; }
         .jt-legend .dot { width: 9px; height: 9px; border-radius: 3px; }
 
@@ -598,6 +1046,16 @@ export default function App() {
         .jt-log-row .total { font-weight: 700; color: var(--gold); margin-right: 10px; }
         .jt-log-del { background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 3px; border-radius: 6px; }
         .jt-log-del:hover { color: #fb7185; background: rgba(244,63,94,0.12); }
+
+        /* ---------- mock tests ---------- */
+        .jt-mock-summary { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+        .jt-mock-trend { display: flex; align-items: flex-end; gap: 8px; height: 90px; margin: 14px 0; padding: 0 2px; overflow-x: auto; }
+        .jt-mock-bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 30px; flex: 1; }
+        .jt-mock-bar { width: 100%; border-radius: 5px 5px 2px 2px; background: linear-gradient(180deg, var(--gold), #f59e0b); transition: height 0.5s cubic-bezier(0.22,1,0.36,1); }
+        .jt-mock-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+        .jt-mock-row { display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 9px; padding: 8px 12px; font-size: 12.5px; gap: 10px; }
+        .jt-mock-row .name { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .jt-mock-row .score { color: var(--gold); font-weight: 800; white-space: nowrap; }
 
         /* ---------- subject tabs ---------- */
         .jt-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; position: relative; }
@@ -648,7 +1106,7 @@ export default function App() {
         .jt-chapter-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 220px; }
         .jt-chapter-name { font-size: 13.5px; font-weight: 600; }
         .jt-chapter-tags { display: flex; gap: 6px; margin-top: 5px; }
-        .jt-chapter-checks { display: flex; gap: 16px; align-items: center; }
+        .jt-chapter-checks { display: flex; gap: 14px; align-items: center; }
         .jt-check { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 11.5px; color: var(--text-dim); }
         .jt-check:focus-visible { outline: 2px solid var(--purple-2); outline-offset: 3px; border-radius: 6px; }
         .jt-tab:focus-visible, .jt-icon-btn:focus-visible, .jt-btn-primary:focus-visible { outline: 2px solid var(--purple-2); outline-offset: 2px; }
@@ -657,6 +1115,11 @@ export default function App() {
           display: flex; align-items: center; justify-content: center; transition: all 0.2s; background: rgba(0,0,0,0.2);
         }
         .jt-check-box.on { background: linear-gradient(135deg, var(--purple-1), var(--pink)); border-color: transparent; animation: popIn 0.25s ease; }
+        .jt-check-box.on.revised-on { background: linear-gradient(135deg, #60a5fa, #34d399); }
+        .jt-notes-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 5px; border-radius: 6px; display: flex; align-items: center; transition: all 0.2s; }
+        .jt-notes-btn:hover { color: var(--purple-2); background: rgba(168,85,247,0.12); }
+        .jt-notes-btn.has-notes { color: var(--gold); }
+        .jt-notes-box { width: 100%; margin-top: 8px; animation: slideInUpFade 0.25s ease both; }
         .jt-chapter-progress-dot { display: flex; gap: 3px; }
         .jt-chapter-progress-dot span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.15); }
         .jt-chapter-progress-dot span.on { background: #34d399; box-shadow: 0 0 6px #34d399; }
@@ -678,6 +1141,10 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.35); border-radius: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
 
+        @media (prefers-reduced-motion: reduce) {
+          .jt-root *, .jt-root *::before, .jt-root *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+        }
+
         /* ============================================================
            MOBILE
            ============================================================ */
@@ -687,14 +1154,12 @@ export default function App() {
 
         @media (max-width: 640px) {
           .jt-root { padding: 14px 10px 40px; }
-
-          /* topbar */
           .jt-topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
           .jt-topbar > div:last-child { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-          .jt-save-indicator { order: 3; width: 100%; }
+          .jt-save-indicator { order: 4; width: 100%; }
+          .jt-xp-wrap { order: 1; width: 100%; justify-content: space-between; }
           .jt-icon-btn { padding: 8px 10px; font-size: 11.5px; flex: 1; justify-content: center; }
 
-          /* hero */
           .jt-hero { padding: 22px 16px; border-radius: 18px; }
           .jt-hero-inner { flex-direction: column; align-items: flex-start; gap: 18px; }
           .jt-hero-number { font-size: 64px; }
@@ -702,15 +1167,13 @@ export default function App() {
           .jt-hero-date-card { flex: 1 1 45%; min-width: 130px; padding: 10px 12px; }
           .jt-hero-date-card .v { font-size: 14.5px; }
 
-          /* panels */
           .jt-panel { padding: 15px; border-radius: 14px; }
           .jt-panel-title { font-size: 14px; }
 
-          /* dashboard */
           .jt-stat-grid { grid-template-columns: 1fr; gap: 10px; }
           .jt-ring-card { padding: 14px; }
+          .jt-badge-strip { padding-bottom: 10px; }
 
-          /* study hours form */
           .jt-hours-form { flex-direction: column; align-items: stretch; gap: 10px; }
           .jt-field { width: 100%; }
           .jt-input { width: 100%; }
@@ -719,6 +1182,7 @@ export default function App() {
 
           .jt-analytics-top { flex-direction: column; }
           .jt-analytics-stat { min-width: 0; }
+          .jt-mock-summary { flex-direction: column; }
 
           .jt-chart { gap: 4px; }
           .jt-chart-col { min-width: 22px; }
@@ -728,23 +1192,20 @@ export default function App() {
           .jt-log-row { flex-wrap: wrap; gap: 4px 10px; }
           .jt-log-row .d { width: auto; }
 
-          /* tabs — horizontal scroll instead of wrap, so labels stay full-size */
           .jt-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
           .jt-tab { flex-shrink: 0; }
 
           .jt-legend-row { flex-direction: column; gap: 8px; }
 
-          /* filters */
           .jt-filters { flex-direction: column; align-items: stretch; }
           .jt-search-wrap { min-width: 0; }
           .jt-select { width: 100%; }
           .jt-toggle { justify-content: flex-start; }
 
-          /* chapter rows */
           .jt-chapter-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
           .jt-chapter-left { min-width: 0; }
-          .jt-chapter-checks { justify-content: space-between; width: 100%; gap: 8px; }
-          .jt-check { flex-direction: column; gap: 4px; font-size: 10.5px; }
+          .jt-chapter-checks { justify-content: space-between; width: 100%; gap: 6px; flex-wrap: wrap; }
+          .jt-check { flex-direction: column; gap: 4px; font-size: 10px; }
 
           .jt-modal { padding: 18px; }
         }
@@ -756,6 +1217,16 @@ export default function App() {
         }
       `}</style>
 
+      {toast && (
+        <div className="jt-toast">
+          <span className="icon">{toast.icon}</span>
+          <div>
+            <div className="title">{toast.title}</div>
+            {toast.sub && <div className="sub">{toast.sub}</div>}
+          </div>
+        </div>
+      )}
+
       <div className="jt-shell">
         {/* ---------------- top bar ---------------- */}
         <div className="jt-topbar slide-down">
@@ -766,11 +1237,19 @@ export default function App() {
               <div className="jt-brand-sub">Physics · Chemistry · Maths — full syllabus checklist</div>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div className="jt-xp-wrap" ref={xpBarRef} title={`${levelInfo.into} / ${levelInfo.span} XP to level ${levelInfo.level + 1}`}>
+              <div className="jt-xp-badge">L{levelInfo.level}</div>
+              <div>
+                <div className="jt-xp-track"><div className="jt-xp-fill" style={{ width: `${Math.min(100, (levelInfo.into / levelInfo.span) * 100)}%` }} /></div>
+                <div className="jt-xp-text">{xp} XP</div>
+              </div>
+            </div>
             <div className="jt-save-indicator">
               <span className={`jt-save-dot ${savedPulse ? "pulsing" : ""}`} />
               Saved in your browser
             </div>
+            <button className="jt-icon-btn" onClick={shareProgressCard}><Share2 size={13} /> Share card</button>
             <button className="jt-icon-btn" onClick={exportData}><Download size={13} /> Backup</button>
             <button className="jt-icon-btn" onClick={() => fileInputRef.current?.click()}><Upload size={13} /> Restore</button>
             <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={importData} />
@@ -815,7 +1294,11 @@ export default function App() {
         </div>
 
         {/* ---------------- dashboard ---------------- */}
-        <div className="jt-panel slide-up-1">
+        <div
+          className="jt-panel jt-reveal"
+          ref={dashRef}
+          style={{ opacity: dashProgress, transform: `translateY(${(1 - dashProgress) * 42}px)` }}
+        >
           <div className="jt-panel-title"><Award size={16} color="var(--gold)" /> Dashboard</div>
           <div className="jt-panel-sub">Overall syllabus progress, subject-wise</div>
 
@@ -827,9 +1310,9 @@ export default function App() {
                   <circle
                     cx="42" cy="42" r="36" stroke="url(#gradRing)" strokeWidth="9" fill="none"
                     strokeDasharray={2 * Math.PI * 36}
-                    strokeDashoffset={2 * Math.PI * 36 * (1 - overallPct / 100)}
+                    strokeDashoffset={ringAnimated ? 2 * Math.PI * 36 * (1 - overallPct / 100) : 2 * Math.PI * 36}
                     strokeLinecap="round"
-                    style={{ transition: "stroke-dashoffset 0.6s ease" }}
+                    style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(0.22,1,0.36,1)" }}
                   />
                   <defs>
                     <linearGradient id="gradRing" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -843,7 +1326,7 @@ export default function App() {
               <div className="info">
                 <div className="t1">Chapters completed</div>
                 <div className="t2">{overall.done} / {overall.total}</div>
-                <div className="t3">{overall.dppDone} DPPs · {overall.pyqDone} PYQ sets cleared</div>
+                <div className="t3">{overall.dppDone} DPPs · {overall.pyqDone} PYQ · {overall.revisedDone} revised</div>
               </div>
             </div>
 
@@ -892,10 +1375,125 @@ export default function App() {
               );
             })}
           </div>
+
+          <div className="jt-panel-head-row" style={{ marginTop: 6 }}>
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+              <Trophy size={14} color="var(--gold)" /> Badges — {unlockedBadges.length}/{BADGES.length} earned
+            </div>
+          </div>
+          <div className="jt-badge-strip">
+            {BADGES.map((b, bi) => {
+              const earned = unlockedBadges.some((u) => u.id === b.id);
+              return (
+                <div
+                  key={b.id}
+                  className={`jt-badge jt-reveal-child ${dashProgress > 0.45 ? "revealed" : ""} ${earned ? "earned" : ""}`}
+                  style={{ transitionDelay: `${0.08 + bi * 0.035}s` }}
+                  title={b.desc}
+                >
+                  <span className="emoji">{b.icon}</span>
+                  <span className="label">{b.label}</span>
+                  <span className="desc">{b.desc}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ---------------- focus mode ---------------- */}
+        <div
+          className="jt-panel jt-reveal"
+          ref={focusRef}
+          style={{ opacity: focusProgress, transform: `translateY(${(1 - focusProgress) * 42}px)` }}
+        >
+          <div className="jt-panel-head-row">
+            <div>
+              <div className="jt-panel-title"><Compass size={16} color="var(--purple-2)" /> Focus Mode — what to study next</div>
+              <div className="jt-panel-sub" style={{ marginBottom: 0 }}>Your own shortlist — add the chapters you're prioritizing right now</div>
+            </div>
+            <button className="jt-icon-btn" onClick={() => { setAddingFocus((v) => !v); setFocusSearch(""); }}>
+              <Plus size={13} /> {addingFocus ? "Close" : "Add chapter"}
+            </button>
+          </div>
+
+          {addingFocus && (
+            <div className="jt-notes-box" style={{ marginTop: 14, marginBottom: 6 }}>
+              <div className="jt-search-wrap" style={{ marginBottom: 10 }}>
+                <Search size={14} className="icon" />
+                <input
+                  className="jt-input"
+                  style={{ width: "100%" }}
+                  placeholder="Search any chapter across all subjects..."
+                  value={focusSearch}
+                  onChange={(e) => setFocusSearch(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="jt-focus-picker-list">
+                {focusPickerResults.length === 0 && (
+                  <div className="jt-empty" style={{ padding: "16px 10px" }}>
+                    {focusList.length === allFlat.length ? "Every chapter is already in your focus list." : "No chapters match that search."}
+                  </div>
+                )}
+                {focusPickerResults.map((c) => {
+                  const meta = SUBJECT_META[c.subject];
+                  return (
+                    <div
+                      key={c.id}
+                      className="jt-focus-pick-row"
+                      onClick={() => addToFocus(c.id)}
+                    >
+                      <div>
+                        <div className="jt-focus-name">{c.name}</div>
+                        <div className="jt-focus-sub" style={{ color: meta.color }}>{meta.label}</div>
+                      </div>
+                      <Plus size={15} color="var(--text-faint)" />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {focusChapters.length === 0 ? (
+            <div className="jt-empty">No chapters added yet — tap "Add chapter" and build your own shortlist.</div>
+          ) : (
+            <div className="jt-focus-list" style={{ marginTop: addingFocus ? 14 : 6 }}>
+              {focusChapters.map((c) => {
+                const wc = W_COLORS[c.w];
+                const state = chapterState[c.id] || {};
+                return (
+                  <div className="jt-focus-row" key={c.id}>
+                    <div className="jt-focus-left">
+                      <span
+                        className={`jt-check-box ${state.completed ? "on" : ""}`}
+                        style={{ cursor: "pointer", flexShrink: 0 }}
+                        onClick={(e) => toggleField(c.id, "completed", e)}
+                        title="Toggle complete"
+                      >
+                        {state.completed && <CheckCircle2 size={13} color="#fff" />}
+                      </span>
+                      <div>
+                        <div className="jt-focus-name" style={{ textDecoration: state.completed ? "line-through" : "none", opacity: state.completed ? 0.6 : 1 }}>{c.name}</div>
+                        <div className="jt-focus-sub">{SUBJECT_META[c.subject].label} · <span style={{ color: wc.text }}>{c.w} weightage</span> · {c.d}</div>
+                      </div>
+                    </div>
+                    <button className="jt-log-del" onClick={() => removeFromFocus(c.id)} title="Remove from focus list">
+                      <X size={15} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* ---------------- study hours logger ---------------- */}
-        <div className="jt-panel slide-up-2">
+        <div
+          className="jt-panel jt-reveal"
+          ref={hoursRef}
+          style={{ opacity: hoursProgress, transform: `translateY(${(1 - hoursProgress) * 42}px)` }}
+        >
           <div className="jt-panel-title"><Clock size={16} color="var(--purple-2)" /> Study Hours Log</div>
           <div className="jt-panel-sub">Log lecture-watching and self-study hours for any date</div>
 
@@ -923,30 +1521,67 @@ export default function App() {
             <div className="jt-analytics-stat"><div className="n">{(totalHoursAllTime / Math.max(1, sortedHoursEntries.length)).toFixed(1)}h</div><div className="l">Avg / logged day</div></div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)", marginBottom: 4 }}>
-            <TrendingUp size={14} /> Last 14 days
+          <div className="jt-panel-head-row" style={{ marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-dim)" }}>
+              <TrendingUp size={14} /> {chartView === "bars" ? "Last 14 days" : "Last ~18 weeks"}
+            </div>
+            <div className="jt-view-toggle">
+              <button className={chartView === "bars" ? "on" : ""} onClick={() => setChartView("bars")}><BarChart3 size={12} /> Bars</button>
+              <button className={chartView === "heatmap" ? "on" : ""} onClick={() => setChartView("heatmap")}><Grid3x3 size={12} /> Heatmap</button>
+            </div>
           </div>
-          <div className="jt-chart">
-            {last14.map((e) => {
-              const total = e.lecture + e.self;
-              const lecturePct = (e.lecture / maxDayTotal) * 100;
-              const selfPct = (e.self / maxDayTotal) * 100;
-              return (
-                <div className="jt-chart-col" key={e.date}>
-                  <div className="jt-chart-total">{total > 0 ? total.toFixed(1) : ""}</div>
-                  <div className="jt-chart-bar-wrap">
-                    <div className="jt-chart-seg-lecture" style={{ height: lecturePct + "%" }} title={`Lecture: ${e.lecture}h`} />
-                    <div className="jt-chart-seg-self" style={{ height: selfPct + "%" }} title={`Self-study: ${e.self}h`} />
+
+          {chartView === "bars" ? (
+            <>
+              <div className="jt-chart">
+                {last14.map((e) => {
+                  const total = e.lecture + e.self;
+                  const lecturePct = (e.lecture / maxDayTotal) * 100;
+                  const selfPct = (e.self / maxDayTotal) * 100;
+                  return (
+                    <div className="jt-chart-col" key={e.date}>
+                      <div className="jt-chart-total">{total > 0 ? total.toFixed(1) : ""}</div>
+                      <div className="jt-chart-bar-wrap">
+                        <div className="jt-chart-seg-lecture" style={{ height: lecturePct + "%" }} title={`Lecture: ${e.lecture}h`} />
+                        <div className="jt-chart-seg-self" style={{ height: selfPct + "%" }} title={`Self-study: ${e.self}h`} />
+                      </div>
+                      <div className="jt-chart-date">{formatShortDate(e.date)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="jt-legend">
+                <span><span className="dot" style={{ background: "var(--purple-2)" }} /> Lecture watching</span>
+                <span><span className="dot" style={{ background: "var(--pink)" }} /> Self study</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="jt-heatmap">
+                {heatmapWeeks.map((week, wi) => (
+                  <div className="jt-heat-col" key={wi}>
+                    {week.map((cell) => (
+                      <div
+                        key={cell.date}
+                        className="jt-heat-cell"
+                        style={{ background: cell.future ? "transparent" : heatColor(cell.total) }}
+                        title={cell.future ? "" : `${formatNiceDate(cell.date)} · ${cell.total.toFixed(1)}h`}
+                      />
+                    ))}
                   </div>
-                  <div className="jt-chart-date">{formatShortDate(e.date)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="jt-legend">
-            <span><span className="dot" style={{ background: "var(--purple-2)" }} /> Lecture watching</span>
-            <span><span className="dot" style={{ background: "var(--pink)" }} /> Self study</span>
-          </div>
+                ))}
+              </div>
+              <div className="jt-legend">
+                <span>Less</span>
+                <span className="dot" style={{ background: "rgba(255,255,255,0.05)" }} />
+                <span className="dot" style={{ background: "rgba(168,85,247,0.25)" }} />
+                <span className="dot" style={{ background: "rgba(168,85,247,0.45)" }} />
+                <span className="dot" style={{ background: "rgba(168,85,247,0.7)" }} />
+                <span className="dot" style={{ background: "#a855f7" }} />
+                <span>More</span>
+              </div>
+            </>
+          )}
 
           {sortedHoursEntries.length > 0 && (
             <div className="jt-log-list">
@@ -962,10 +1597,78 @@ export default function App() {
           )}
         </div>
 
+        {/* ---------------- mock test tracker ---------------- */}
+        <div
+          className="jt-panel jt-reveal"
+          ref={mockRef}
+          style={{ opacity: mockProgress, transform: `translateY(${(1 - mockProgress) * 42}px)` }}
+        >
+          <div className="jt-panel-title"><Rocket size={16} color="var(--gold)" /> Mock Test Tracker</div>
+          <div className="jt-panel-sub">Log every full mock so you can see the score trend, not just the last number</div>
+
+          <div className="jt-hours-form">
+            <div className="jt-field" style={{ minWidth: 180 }}>
+              <label>Test name</label>
+              <input className="jt-input" style={{ width: "100%" }} placeholder="e.g. Allen Mock 7" value={mtName} onChange={(e) => setMtName(e.target.value)} />
+            </div>
+            <div className="jt-field">
+              <label>Date</label>
+              <input className="jt-input" type="date" value={mtDate} onChange={(e) => setMtDate(e.target.value)} />
+            </div>
+            <div className="jt-field">
+              <label>Score</label>
+              <input className="jt-input" style={{ width: 100 }} type="number" placeholder="e.g. 182" value={mtScore} onChange={(e) => setMtScore(e.target.value)} />
+            </div>
+            <div className="jt-field">
+              <label>Max marks</label>
+              <input className="jt-input" style={{ width: 100 }} type="number" placeholder="300" value={mtMax} onChange={(e) => setMtMax(e.target.value)} />
+            </div>
+            <button className="jt-btn-primary" onClick={handleAddMock}><Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />Log test</button>
+            {mtMsg && <span className="jt-form-msg">{mtMsg}</span>}
+          </div>
+
+          {mockTests.length > 0 && (
+            <>
+              <div className="jt-mock-summary">
+                <div className="jt-analytics-stat"><div className="n">{mockTests.length}</div><div className="l">Mocks logged</div></div>
+                <div className="jt-analytics-stat"><div className="n">{avgMockPct}%</div><div className="l">Average score</div></div>
+                <div className="jt-analytics-stat"><div className="n" style={{ display: "flex", alignItems: "center", gap: 6 }}><Star size={16} color="var(--gold)" />{bestMock ? Math.round(bestMock.pct) : 0}%</div><div className="l">Best: {bestMock?.name}</div></div>
+              </div>
+              <div className="jt-mock-trend">
+                {sortedMocks.slice(-14).map((m) => {
+                  const pct = (m.score / m.maxScore) * 100;
+                  return (
+                    <div className="jt-mock-bar-wrap" key={m.id}>
+                      <div className="jt-chart-total">{m.score}</div>
+                      <div className="jt-mock-bar" style={{ height: `${Math.max(4, pct)}%` }} title={`${m.name}: ${m.score}/${m.maxScore}`} />
+                      <div className="jt-chart-date">{formatShortDate(m.date)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="jt-mock-list">
+                {[...sortedMocks].reverse().map((m) => (
+                  <div className="jt-mock-row" key={m.id}>
+                    <span className="name">{m.name}</span>
+                    <span style={{ color: "var(--text-faint)", whiteSpace: "nowrap" }}>{formatNiceDate(m.date)}</span>
+                    <span className="score">{m.score}/{m.maxScore}</span>
+                    <button className="jt-log-del" onClick={() => handleDeleteMock(m.id)}><Trash2 size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {mockTests.length === 0 && <div className="jt-empty">No mocks logged yet — add your first one above once you sit one.</div>}
+        </div>
+
         {/* ---------------- chapter checklist ---------------- */}
-        <div className="jt-panel slide-up-3" ref={checklistRef}>
+        <div
+          className="jt-panel jt-reveal"
+          ref={(el) => { checklistRef.current = el; checklistRevealRef.current = el; }}
+          style={{ opacity: checklistProgress, transform: `translateY(${(1 - checklistProgress) * 42}px)` }}
+        >
           <div className="jt-panel-title"><BookOpen size={16} color="var(--purple-2)" /> Chapter Checklist</div>
-          <div className="jt-panel-sub">Track chapter completion, DPPs and PYQs — chapter by chapter</div>
+          <div className="jt-panel-sub">Track chapter completion, DPPs, PYQs and revision — chapter by chapter</div>
 
           <div className="jt-tabs" ref={tabsWrapRef}>
             {tabIndicator.ready && (
@@ -1039,6 +1742,7 @@ export default function App() {
               const state = chapterState[c.id] || {};
               const wc = W_COLORS[c.w];
               const dc = D_COLORS[c.d];
+              const notesOpen = openNotesId === c.id;
               return (
                 <div
                   className={`jt-chapter-row ${state.completed ? "complete" : ""}`}
@@ -1050,6 +1754,7 @@ export default function App() {
                       <span className={state.completed ? "on" : ""} />
                       <span className={state.dpp ? "on" : ""} />
                       <span className={state.pyq ? "on" : ""} />
+                      <span className={state.revised ? "on" : ""} />
                     </div>
                     <div>
                       <div className="jt-chapter-name">{c.name}</div>
@@ -1065,8 +1770,8 @@ export default function App() {
                       role="checkbox"
                       aria-checked={!!state.completed}
                       tabIndex={0}
-                      onClick={() => toggleField(c.id, "completed")}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "completed"); } }}
+                      onClick={(e) => toggleField(c.id, "completed", e)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "completed", e); } }}
                     >
                       <span className={`jt-check-box ${state.completed ? "on" : ""}`}>{state.completed && <CheckCircle2 size={13} color="#fff" />}</span>
                       Chapter
@@ -1076,8 +1781,8 @@ export default function App() {
                       role="checkbox"
                       aria-checked={!!state.dpp}
                       tabIndex={0}
-                      onClick={() => toggleField(c.id, "dpp")}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "dpp"); } }}
+                      onClick={(e) => toggleField(c.id, "dpp", e)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "dpp", e); } }}
                     >
                       <span className={`jt-check-box ${state.dpp ? "on" : ""}`}>{state.dpp && <CheckCircle2 size={13} color="#fff" />}</span>
                       DPP
@@ -1087,13 +1792,42 @@ export default function App() {
                       role="checkbox"
                       aria-checked={!!state.pyq}
                       tabIndex={0}
-                      onClick={() => toggleField(c.id, "pyq")}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "pyq"); } }}
+                      onClick={(e) => toggleField(c.id, "pyq", e)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "pyq", e); } }}
                     >
                       <span className={`jt-check-box ${state.pyq ? "on" : ""}`}>{state.pyq && <CheckCircle2 size={13} color="#fff" />}</span>
                       PYQ
                     </label>
+                    <label
+                      className="jt-check"
+                      role="checkbox"
+                      aria-checked={!!state.revised}
+                      tabIndex={0}
+                      onClick={(e) => toggleField(c.id, "revised", e)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleField(c.id, "revised", e); } }}
+                    >
+                      <span className={`jt-check-box ${state.revised ? "on revised-on" : ""}`}>{state.revised && <Repeat size={12} color="#fff" />}</span>
+                      Revised
+                    </label>
+                    <button
+                      className={`jt-notes-btn ${state.notes ? "has-notes" : ""}`}
+                      title={state.notes ? "Edit note" : "Add a note"}
+                      onClick={() => setOpenNotesId(notesOpen ? null : c.id)}
+                    >
+                      <PenLine size={14} />
+                    </button>
                   </div>
+                  {notesOpen && (
+                    <div className="jt-notes-box">
+                      <textarea
+                        className="jt-input"
+                        placeholder="Doubt to revisit, formula to remember, weak sub-topic..."
+                        value={state.notes || ""}
+                        onChange={(e) => setNotes(c.id, e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1104,14 +1838,14 @@ export default function App() {
           <button className="jt-icon-btn" onClick={() => setShowResetConfirm(true)}><RotateCcw size={13} /> Reset chapter progress</button>
         </div>
 
-        <div className="jt-footer">Data is saved automatically to this browser's local storage — it stays even after a refresh, but is tied to this browser/device. Use Backup to keep a portable copy, Restore to bring it back or move it to another device.</div>
+        <div className="jt-footer">Data is saved automatically to this browser's local storage — it stays even after a refresh or an app update, but is tied to this browser/device. Use Backup to keep a portable copy, Restore to bring it back or move it to another device.</div>
       </div>
 
       {showResetConfirm && (
         <div className="jt-modal-overlay" onClick={() => setShowResetConfirm(false)}>
           <div className="jt-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Reset all chapter progress?</h3>
-            <p>This clears every chapter/DPP/PYQ checkbox. Your study-hours log stays untouched. This can't be undone.</p>
+            <p>This clears every chapter/DPP/PYQ/revised checkbox and notes. Your study-hours log and mock tests stay untouched. This can't be undone.</p>
             <div className="jt-modal-actions">
               <button className="jt-btn-ghost" onClick={() => setShowResetConfirm(false)}>Cancel</button>
               <button className="jt-btn-danger" onClick={resetAllProgress}>Reset</button>
