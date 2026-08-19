@@ -1338,7 +1338,7 @@ export default function App() {
               <div className="jt-hero-date-card">
                 <div className="k">Attempt</div>
                 <div className="v">3rd attempt</div>
-                <div className="v2">Target: 240–250 / 300 · OBC-NCL</div>
+                <div className="v2">Target: 240–250 / 300 </div>
               </div>
             </div>
           </div>
