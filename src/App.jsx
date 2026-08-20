@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import {
-  Clock, BookOpen, CheckCircle2, Circle, Flame, TrendingUp, Calendar,
-  Download, Upload, Search, X, Zap, Award, ChevronDown, RotateCcw,
-  Sparkles, Trophy, Repeat, PenLine, Share2, Grid3x3, BarChart3, Rocket,
-  ChevronRight, Plus, Trash2, Star, Compass, Medal,
+  Clock, BookOpen, CheckCircle2, Flame, TrendingUp,
+  Download, Upload, Search, X, Zap, Award, RotateCcw,
+  Trophy, Repeat, PenLine, Share2, Grid3x3, BarChart3, Rocket,
+  Plus, Trash2, Star, Compass,
 } from "lucide-react";
 
 /* ============================================================
@@ -220,7 +220,7 @@ function useScrollProgress() {
   const ref = useRef(null);
   const [progress, setProgress] = useState(0);
   const maxProgress = useRef(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     if (typeof window === "undefined") return;
@@ -362,13 +362,20 @@ export default function App() {
     checklistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
+  // Stable identity so React doesn't detach/reattach this ref on every
+  // scroll-driven re-render (an inline arrow function here would).
+  const setChecklistNode = useCallback((el) => {
+    checklistRef.current = el;
+    checklistRevealRef.current = el;
+  }, []);
+
   const showToast = useCallback((t) => {
     setToast(t);
     setTimeout(() => setToast(null), 3600);
   }, []);
 
   /* ---------------- sliding tab indicator ---------------- */
-  useEffect(() => {
+  useLayoutEffect(() => {
     const measure = () => {
       const el = tabRefs.current[activeSubject];
       if (el) setTabIndicator({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight, ready: true });
@@ -557,10 +564,6 @@ export default function App() {
     () => [...mockTests].sort((a, b) => (a.date < b.date ? -1 : 1)),
     [mockTests]
   );
-  const mockMaxObserved = useMemo(
-    () => Math.max(300, ...mockTests.map((m) => Number(m.maxScore) || 0)),
-    [mockTests]
-  );
   const bestMock = useMemo(
     () => mockTests.reduce((best, m) => {
       const pct = (Number(m.score) / Math.max(1, Number(m.maxScore))) * 100;
@@ -745,7 +748,7 @@ export default function App() {
     });
 
     ctx.fillStyle = "#8e8e93"; ctx.font = "600 22px Segoe UI, sans-serif";
-    ctx.fillText(`Generated ${formatNiceDate(todayStr())} · Target 240–250/300 `, 70, 1300);
+    ctx.fillText(`Generated ${formatNiceDate(todayStr())} · Target 240–250/300`, 70, 1300);
 
     canvas.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
@@ -811,7 +814,6 @@ export default function App() {
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(14px);} to { opacity: 1; transform: translateY(0);} }
         @keyframes floatGlow { 0%,100% { transform: translateY(0px);} 50% { transform: translateY(-6px);} }
         @keyframes pulseDot { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.4; transform: scale(0.8);} }
-        @keyframes shimmer { 0% { background-position: -200% 0;} 100% { background-position: 200% 0;} }
         @keyframes popIn { from { opacity: 0; transform: scale(0.85);} to { opacity: 1; transform: scale(1);} }
         @keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
         @keyframes slideInDown { from { opacity: 0; transform: translateY(-18px); } to { opacity: 1; transform: translateY(0); } }
@@ -823,7 +825,6 @@ export default function App() {
         @keyframes toastIn { from { opacity: 0; transform: translate(-50%, -18px) scale(0.92); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
         @keyframes glowPulse { 0%,100% { box-shadow: 0 0 18px var(--card-glow, rgba(125,122,255,0.35)); } 50% { box-shadow: 0 0 32px var(--card-glow, rgba(125,122,255,0.55)); } }
         @keyframes xpFill { from { width: 0%; } }
-        @keyframes ringSpin { from { stroke-dashoffset: 226; } }
         @keyframes float3 { 0%,100% { transform: translateY(0) rotate(0deg);} 50% { transform: translateY(-4px) rotate(1deg);} }
         @keyframes logoRingDraw { from { stroke-dashoffset: 226; } to { stroke-dashoffset: 0; } }
         @keyframes logoCheckDraw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
@@ -838,17 +839,12 @@ export default function App() {
         .fade-in { animation: fadeInUp 0.5s ease both; }
         .slide-down { animation: slideInDown 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
         .slide-left { animation: slideInLeft 0.65s cubic-bezier(0.22, 1, 0.36, 1) both; }
-        .slide-up-1 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.05s; }
-        .slide-up-2 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.12s; }
-        .slide-up-3 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.19s; }
-        .slide-up-4 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.26s; }
-        .slide-up-5 { animation: slideInUpFade 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.33s; }
         .slide-right-stagger { animation: slideInRight 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
         /* ---------- scroll-triggered reveal (late, smooth, one-time) ---------- */
         .jt-reveal {
           will-change: opacity, transform;
-          transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: opacity 0.12s linear, transform 0.12s linear;
         }
         .jt-reveal-child { transform: translateY(22px); transition: transform 0.7s cubic-bezier(0.16,1,0.3,1); }
         .jt-reveal-child.revealed { transform: translateY(0); }
@@ -941,7 +937,7 @@ export default function App() {
           position: absolute; top: -20%; left: -70%; width: 40%; height: 140%;
           background: linear-gradient(100deg, transparent, rgba(255,255,255,0.14), transparent);
           transform: skewX(-16deg);
-          animation: glassSheen 1.2s ease-in-out 0.6s 1 forwards;
+          animation: glassSheen 1.3s ease-in-out 0.6s 1 forwards;
           pointer-events: none;
         }
         .jt-hero-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; position: relative; z-index: 1; }
@@ -986,7 +982,7 @@ export default function App() {
           position: absolute; top: -20%; left: -70%; width: 45%; height: 140%;
           background: linear-gradient(100deg, transparent, rgba(255,255,255,0.10), transparent);
           transform: skewX(-16deg);
-          animation: glassSheen 1.2s ease-in-out 0.3s 1 forwards;
+          animation: glassSheen 10s ease-in-out infinite;
           pointer-events: none;
         }
         .jt-panel:hover {
@@ -1061,11 +1057,8 @@ export default function App() {
         }
         .jt-focus-row:hover { background: rgba(255,255,255,0.06); }
         .jt-focus-left { display: flex; align-items: center; gap: 10px; }
-        .jt-focus-rank { width: 24px; height: 24px; border-radius: 8px; display:flex; align-items:center; justify-content:center; font-size: 11px; font-weight: 800; background: rgba(125,122,255,0.2); color: var(--purple-2); flex-shrink: 0; }
         .jt-focus-name { font-size: 13px; font-weight: 600; }
         .jt-focus-sub { font-size: 10.5px; color: var(--text-faint); }
-        .jt-focus-btn { display: flex; align-items: center; gap: 5px; background: rgba(62,207,148,0.14); border: 1px solid rgba(62,207,148,0.4); color: #3ecf94; padding: 6px 11px; border-radius: 8px; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
-        .jt-focus-btn:hover { background: rgba(62,207,148,0.25); transform: translateY(-1px); }
         .jt-focus-picker-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
         .jt-focus-pick-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
         .jt-focus-pick-row:hover { background: rgba(125,122,255,0.12); border-color: rgba(125,122,255,0.3); }
@@ -1091,13 +1084,13 @@ export default function App() {
         .jt-btn-primary:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 20px rgba(125,122,255,0.5); }
         .jt-form-msg { font-size: 12px; color: var(--gold); margin-left: 4px; }
 
-        .jt-view-toggle { display: flex; gap: 4px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft); border-radius: 9px; padding: 3px; }
+        .jt-view-toggle { display: flex; gap: 4px; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.13); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); border-radius: 12px; padding: 3px; }
         .jt-view-toggle button { display:flex; align-items:center; gap:5px; background: transparent; border: none; color: var(--text-faint); padding: 6px 10px; border-radius: 7px; font-size: 11.5px; cursor: pointer; transition: all 0.2s; }
         .jt-view-toggle button.on { background: linear-gradient(135deg, var(--purple-1), var(--pink)); color: #fff; }
 
         .jt-analytics-top { display: flex; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
-        .jt-analytics-stat { background: rgba(0,0,0,0.25); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 16px; flex: 1; min-width: 130px; transition: transform 0.2s; }
-        .jt-analytics-stat:hover { transform: translateY(-2px); }
+        .jt-analytics-stat { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.13); backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%); border-radius: 14px; padding: 10px 16px; flex: 1; min-width: 130px; transition: transform 0.2s, background 0.2s; }
+        .jt-analytics-stat:hover { transform: translateY(-2px); background: rgba(255,255,255,0.07); }
         .jt-analytics-stat .n { font-size: 21px; font-weight: 800; }
         .jt-analytics-stat .l { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 
@@ -1166,9 +1159,12 @@ export default function App() {
         .jt-search-wrap input { width: 100%; padding-left: 34px; }
         .jt-search-wrap .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-faint); }
         .jt-select {
-          background: rgba(0,0,0,0.3); border: 1px solid var(--border-soft); color: var(--text-dim);
-          padding: 9px 12px; border-radius: 9px; font-size: 12.5px; cursor: pointer; outline: none;
+          background: rgba(255,255,255,0.055); border: 1px solid rgba(255,255,255,0.14); color: var(--text-dim);
+          backdrop-filter: blur(14px) saturate(160%);
+          -webkit-backdrop-filter: blur(14px) saturate(160%);
+          padding: 9px 12px; border-radius: 12px; font-size: 12.5px; cursor: pointer; outline: none; transition: border 0.2s, background 0.2s;
         }
+        .jt-select:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.22); }
         .jt-toggle { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; user-select: none; }
         .jt-toggle input { accent-color: var(--purple-2); width: 15px; height: 15px; cursor: pointer; }
 
@@ -1392,7 +1388,7 @@ export default function App() {
               <div className="jt-hero-date-card">
                 <div className="k">Attempt</div>
                 <div className="v">3rd attempt</div>
-                <div className="v2">Target: 240–250 / 300 </div>
+                <div className="v2">Target: 240–250 / 300</div>
               </div>
             </div>
           </div>
@@ -1769,7 +1765,7 @@ export default function App() {
         {/* ---------------- chapter checklist ---------------- */}
         <div
           className="jt-panel jt-reveal"
-          ref={(el) => { checklistRef.current = el; checklistRevealRef.current = el; }}
+          ref={setChecklistNode}
           style={{ opacity: checklistProgress, transform: `translateY(${(1 - checklistProgress) * 42}px)` }}
         >
           <div className="jt-panel-title"><BookOpen size={16} color="var(--purple-2)" /> Chapter Checklist</div>
